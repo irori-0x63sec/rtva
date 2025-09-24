@@ -13,7 +13,7 @@ except Exception:  # pragma: no cover - parselmouth may be missing
     parselmouth = None  # type: ignore
 
 
-def pre_emphasis(x: NDArray[np.floating], coef: float = 0.97) -> NDArray[np.floating]:
+def _pre_emphasis(x: NDArray[np.floating], coef: float = 0.97) -> NDArray[np.floating]:
     """Apply a simple pre-emphasis filter."""
 
     return lfilter([1.0, -coef], [1.0], x)
@@ -44,7 +44,7 @@ def _roots_to_formants(
 
 
 def lpc_formants(
-    frame: NDArray[np.floating], sr: int, order: int = 14, fmax: int = 5000
+    frame: NDArray[np.floating], sr: int, order: int = 16, fmax: int = 5500
 ) -> tuple[float, float, float]:
     """Estimate up to the first three formants using LPC analysis."""
 
@@ -52,7 +52,10 @@ def lpc_formants(
         return (0.0, 0.0, 0.0)
 
     x = np.asarray(frame, dtype=np.float64)
-    x = pre_emphasis(x, 0.97)
+    if not np.any(np.isfinite(x)):
+        return (0.0, 0.0, 0.0)
+
+    x = _pre_emphasis(x, 0.97)
     x *= np.hanning(x.size)
 
     if not np.any(np.abs(x) > 0):
@@ -82,21 +85,24 @@ def burg_formants_parselmouth(
     """Estimate formants using Praat's Burg method via parselmouth."""
 
     if parselmouth is None:
-        raise RuntimeError("parselmouth is not available")
+        return (0.0, 0.0, 0.0)
 
-    snd = parselmouth.Sound(frame.astype(float), sampling_frequency=sr)
-    formant = snd.to_formant_burg(
-        time_step=0.0,
-        max_number_of_formants=5,
-        maximum_formant=fmax,
-        pre_emphasis_from=50.0,
-    )
-    t_mid = snd.xmin + 0.5 * snd.get_total_duration()
-    values: list[float] = []
-    for i in range(1, 4):
-        val = formant.get_value_at_time(i, t_mid)
-        if val is None or math.isnan(val):
-            values.append(0.0)
-        else:
-            values.append(float(val))
-    return values[0], values[1], values[2]
+    try:
+        snd = parselmouth.Sound(frame.astype(float), sampling_frequency=sr)
+        formant = snd.to_formant_burg(
+            time_step=0.0,
+            max_number_of_formants=5,
+            maximum_formant=fmax,
+            pre_emphasis_from=50.0,
+        )
+        t_mid = snd.xmin + 0.5 * snd.get_total_duration()
+        values: list[float] = []
+        for i in range(1, 4):
+            val = formant.get_value_at_time(i, t_mid)
+            if val is None or math.isnan(val):
+                values.append(0.0)
+            else:
+                values.append(float(val))
+        return values[0], values[1], values[2]
+    except Exception:
+        return (0.0, 0.0, 0.0)
