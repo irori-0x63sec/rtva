@@ -22,6 +22,7 @@ rtva/logging/recorder.py
 rtva/tests/test_lpc.py
 rtva/tests/test_pitch.py
 rtva/tests/test_signals.py
+rtva/tests/test_spectrum.py
 rtva/ui/__init__.py
 rtva/ui/controls.py
 rtva/ui/main_window.py
