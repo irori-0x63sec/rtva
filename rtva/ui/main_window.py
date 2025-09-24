@@ -1,9 +1,11 @@
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout
-from PyQt6.QtCore import QTimer
 import numpy as np
-from rtva.ui.panels import PitchPanel, SpectroPanel, HarmonicsPanel, CPPPanel
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+
 from rtva.audio import AudioStream, hann
 from rtva.dsp.pitch import yin_f0
+from rtva.ui.panels import CPPPanel, HarmonicsPanel, PitchPanel, SpectroPanel
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -25,7 +27,7 @@ class MainWindow(QMainWindow):
 
         # === Audio / DSP ===
         self.sr = 44100
-        self.hop_ms = 10         # 10msごと更新 ≒ 100 Hz
+        self.hop_ms = 10  # 10msごと更新 ≒ 100 Hz
         self.win_ms = 32
         self.blocksize = int(self.sr * self.hop_ms / 1000)
         self.win = int(self.sr * self.win_ms / 1000)
@@ -54,7 +56,7 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         self.win_buf = np.roll(self.win_buf, -len(hop))
-        self.win_buf[-len(hop):] = hop
+        self.win_buf[-len(hop) :] = hop
         frame = (self.win_buf * self.win_hann).astype(np.float32)
 
         # F0推定（YIN）
@@ -70,7 +72,7 @@ class MainWindow(QMainWindow):
         buf = self.pitch.buf.copy()
         # nanを除外
         vals = buf[~np.isnan(buf)]
-        if len(vals) < max(5, n//2):
+        if len(vals) < max(5, n // 2):
             return None
         recent = vals[-n:]
         hz = recent[recent > 0]
