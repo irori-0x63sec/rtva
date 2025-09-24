@@ -3,6 +3,7 @@
 # 優先: Praat (parselmouth) / 失敗時: 自前オートコリレーションにフォールバック。
 
 from __future__ import annotations
+
 import numpy as np
 
 try:
@@ -11,7 +12,9 @@ except Exception:  # parselmouthが無い・動かない場合も考慮
     parselmouth = None
 
 
-def _pitch_parselmouth(frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float = 350.0) -> float:
+def _pitch_parselmouth(
+    frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float = 350.0
+) -> float:
     """Praat(autocorrelation)でF0を推定。中央値でロバスト化。"""
     snd = parselmouth.Sound(frame.astype(float), sampling_frequency=sr)
     # time_step=0 は自動。autocorrelation method が既定。

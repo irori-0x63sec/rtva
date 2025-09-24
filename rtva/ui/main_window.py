@@ -1,20 +1,33 @@
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout
-from PyQt6.QtCore import QTimer
 import numpy as np
-from rtva.ui.panels import PitchPanel, SpectroPanel, HarmonicsPanel, CPPPanel
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
+
 from rtva.audio import AudioStream, hann
+from rtva.dsp.lpc import lpc_formants
 from rtva.dsp.pitch import yin_f0
+from rtva.dsp.spectrum import stft_mag_db
+from rtva.ui.panels import CPPPanel, HarmonicsPanel, PitchPanel, SpectroPanel
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("RTVA — Real-Time Voice Analyzer")
 
+        # === Audio / DSP ===
+        self.sr = 44100
+        self.hop_ms = 10  # 10msごと更新 ≒ 100 Hz
+        self.win_ms = 32
+        self.blocksize = int(self.sr * self.hop_ms / 1000)
+        self.win = int(self.sr * self.win_ms / 1000)
+        self.win_buf = np.zeros(self.win, dtype=np.float32)
+        self.win_hann = hann(self.win)
+
         # === GUI ===
         central = QWidget(self)
         lay = QVBoxLayout(central)
         self.pitch = PitchPanel(timespan_sec=10, sr_hop=100)
-        self.spectro = SpectroPanel()
+        self.spectro = SpectroPanel(timespan_sec=6.0, hop_s=self.hop_ms / 1000.0, fmax=5000.0)
         self.harm = HarmonicsPanel()
         self.cpp = CPPPanel()
         lay.addWidget(self.pitch)
@@ -22,15 +35,6 @@ class MainWindow(QMainWindow):
         lay.addWidget(self.harm)
         lay.addWidget(self.cpp)
         self.setCentralWidget(central)
-
-        # === Audio / DSP ===
-        self.sr = 44100
-        self.hop_ms = 10         # 10msごと更新 ≒ 100 Hz
-        self.win_ms = 32
-        self.blocksize = int(self.sr * self.hop_ms / 1000)
-        self.win = int(self.sr * self.win_ms / 1000)
-        self.win_buf = np.zeros(self.win, dtype=np.float32)
-        self.win_hann = hann(self.win)
 
         self.stream = AudioStream(sr=self.sr, blocksize=self.blocksize)
         self.stream.start()
@@ -54,7 +58,7 @@ class MainWindow(QMainWindow):
         except Exception:
             return
         self.win_buf = np.roll(self.win_buf, -len(hop))
-        self.win_buf[-len(hop):] = hop
+        self.win_buf[-len(hop) :] = hop
         frame = (self.win_buf * self.win_hann).astype(np.float32)
 
         # F0推定（YIN）
@@ -65,12 +69,18 @@ class MainWindow(QMainWindow):
         cents_std = self._cents_std_recent()
         self.pitch.update_stability(cents_std)
 
+        freqs, mag_db = stft_mag_db(frame, self.sr, n_fft=self.win)
+        self.spectro.update_spectrogram(freqs, mag_db)
+
+        f1, f2, f3 = lpc_formants(frame, self.sr, order=14, fmax=5000)
+        self.spectro.update_formants(f1, f2, f3)
+
     def _cents_std_recent(self, n=50):
         # PitchPanelのリングバッファから直近n点の標準偏差[cent]
         buf = self.pitch.buf.copy()
         # nanを除外
         vals = buf[~np.isnan(buf)]
-        if len(vals) < max(5, n//2):
+        if len(vals) < max(5, n // 2):
             return None
         recent = vals[-n:]
         hz = recent[recent > 0]

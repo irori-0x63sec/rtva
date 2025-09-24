@@ -1,9 +1,12 @@
-import sounddevice as sd
-import numpy as np
 from queue import Queue
+
+import numpy as np
+import sounddevice as sd
+
 
 class AudioStream:
     """Mic → ライブフレーム供給。hopごとに非同期で取り出せる"""
+
     def __init__(self, sr=44100, blocksize=1024):
         self.sr = sr
         self.blocksize = blocksize
@@ -35,6 +38,7 @@ class AudioStream:
     def read(self):
         """ブロックを1つ返す（float32, shape=(blocksize,)）"""
         return self.q.get()
+
 
 def hann(n: int):
     return 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(n) / n)
