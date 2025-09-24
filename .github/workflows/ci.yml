@@ -19,9 +19,10 @@ jobs:
 
       # ★ 最小依存に numpy を追加（テストが numpy 前提）
       - name: Install minimal deps
-        run: |
-          pip install numpy
-          pip install pytest pytest-cov black isort flake8
+	run: |
+    	python -m pip install --upgrade pip
+    	pip install numpy scipy
+    	pip install pytest pytest-cov black isort flake8
 
       - name: Lint (black/isort/flake8)
         run: |
