@@ -1,9 +1,15 @@
+from __future__ import annotations
+
+from collections import deque
+
 import numpy as np
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from rtva.audio import AudioStream, hann
+from rtva.dsp.lpc import burg_formants_parselmouth, lpc_formants
 from rtva.dsp.pitch import yin_f0
+from rtva.dsp.spectrum import stft_mag_db
 from rtva.ui.panels import CPPPanel, HarmonicsPanel, PitchPanel, SpectroPanel
 
 
@@ -33,6 +39,14 @@ class MainWindow(QMainWindow):
         self.win = int(self.sr * self.win_ms / 1000)
         self.win_buf = np.zeros(self.win, dtype=np.float32)
         self.win_hann = hann(self.win)
+
+        self.formant_method = "burg"
+        self.formant_max_hz = 5500
+        self.lpc_order = 16
+        self.spec_history_frames = int(5 * 100)  # 5秒分の表示
+        self.frames_buffer: deque[np.ndarray] = deque(maxlen=self.spec_history_frames)
+        self.formant_history = [deque(maxlen=self.spec_history_frames) for _ in range(3)]
+        self.n_fft = 2048
 
         self.stream = AudioStream(sr=self.sr, blocksize=self.blocksize)
         self.stream.start()
@@ -67,6 +81,9 @@ class MainWindow(QMainWindow):
         cents_std = self._cents_std_recent()
         self.pitch.update_stability(cents_std)
 
+        self._update_formants(frame)
+        self._update_spectrogram()
+
     def _cents_std_recent(self, n=50):
         # PitchPanelのリングバッファから直近n点の標準偏差[cent]
         buf = self.pitch.buf.copy()
@@ -82,3 +99,35 @@ class MainWindow(QMainWindow):
         med = np.median(hz)
         cents = 1200 * np.log2(hz / med)
         return float(np.std(cents))
+
+    def _update_formants(self, frame: np.ndarray) -> None:
+        self.frames_buffer.append(frame.copy())
+
+        f1 = f2 = f3 = 0.0
+        use_burg = self.formant_method == "burg"
+        if use_burg:
+            try:
+                f1, f2, f3 = burg_formants_parselmouth(frame, self.sr, fmax=self.formant_max_hz)
+            except Exception:
+                use_burg = False
+
+        if (not use_burg) and (self.formant_method in {"lpc", "burg"}):
+            f1, f2, f3 = lpc_formants(
+                frame, self.sr, order=self.lpc_order, fmax=self.formant_max_hz
+            )
+
+        for idx, value in enumerate((f1, f2, f3)):
+            series = self.formant_history[idx]
+            if value > 0:
+                series.append(float(value))
+            else:
+                series.append(np.nan)
+
+    def _update_spectrogram(self) -> None:
+        if len(self.frames_buffer) < 4:
+            return
+
+        frames = np.stack(self.frames_buffer, axis=0)
+        S_db, freqs, times = stft_mag_db(frames, self.sr, n_fft=self.n_fft, hop=self.blocksize)
+        formants = [np.asarray(hist, dtype=float) for hist in self.formant_history]
+        self.spectro.update(S_db, freqs, times, formants)
