@@ -1,6 +1,6 @@
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QRectF, Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 
@@ -57,13 +57,62 @@ class PitchPanel(QWidget):
 
 
 class SpectroPanel(QWidget):
-    """スペクトログラム/フォームント用プレースホルダ"""
+    """STFTヒートマップ + Formant overlay"""
 
     def __init__(self) -> None:
         super().__init__()
         layout = QVBoxLayout()
         self.setLayout(layout)
-        layout.addWidget(QLabel("Spectrogram (coming soon)"))
+
+        self.plot = pg.PlotWidget()
+        self.plot.setLabel("left", "Frequency (Hz)")
+        self.plot.setLabel("bottom", "Time (s)")
+        self.plot.setLimits(yMin=0)
+        self.plot.showGrid(x=True, y=True, alpha=0.2)
+        self.plot.setMenuEnabled(False)
+        self.plot.setMouseEnabled(x=False, y=False)
+
+        cmap = pg.colormap.get("inferno")
+        self.image_item = pg.ImageItem()
+        self.image_item.setLookupTable(cmap.getLookupTable(0.0, 1.0, 256))
+        self.image_item.setLevels([-80, 0])
+        self.plot.addItem(self.image_item)
+
+        self.formant_curves = [
+            self.plot.plot(pen=pg.mkPen(color, width=2))
+            for color in ["#4CAF50", "#FFC107", "#03A9F4"]
+        ]
+
+        layout.addWidget(self.plot)
+
+    def update_spectrogram(
+        self, spec_db: np.ndarray, freq_axis: np.ndarray, time_axis: np.ndarray
+    ) -> None:
+        if spec_db.size == 0:
+            return
+
+        flipped = np.flipud(spec_db)
+        self.image_item.setImage(flipped, autoLevels=False)
+
+        if len(freq_axis) > 1 and len(time_axis) > 1:
+            rect = QRectF(
+                float(time_axis[0]),
+                float(freq_axis[0]),
+                float(time_axis[-1] - time_axis[0]),
+                float(freq_axis[-1] - freq_axis[0]),
+            )
+            self.image_item.setRect(rect)
+            self.plot.setRange(xRange=(time_axis[0], time_axis[-1]), yRange=(0, freq_axis[-1]))
+
+    def update_formants(
+        self, time_axis: np.ndarray, f1: np.ndarray, f2: np.ndarray, f3: np.ndarray
+    ) -> None:
+        data = [f1, f2, f3]
+        for curve, vals in zip(self.formant_curves, data):
+            if time_axis.size == 0:
+                curve.clear()
+                continue
+            curve.setData(time_axis, vals, connect="finite")
 
 
 class HarmonicsPanel(QWidget):

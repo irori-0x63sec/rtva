@@ -3,7 +3,9 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
 from rtva.audio import AudioStream, hann
+from rtva.dsp.lpc import burg_formants_parselmouth, lpc_formants
 from rtva.dsp.pitch import yin_f0
+from rtva.dsp.spectrum import stft_mag_db
 from rtva.ui.panels import CPPPanel, HarmonicsPanel, PitchPanel, SpectroPanel
 
 
@@ -33,6 +35,15 @@ class MainWindow(QMainWindow):
         self.win = int(self.sr * self.win_ms / 1000)
         self.win_buf = np.zeros(self.win, dtype=np.float32)
         self.win_hann = hann(self.win)
+        self.n_fft = 2048
+
+        self.spec_capacity = int(5 * 1000 / self.hop_ms)  # 約5秒保持
+        self.spec_frames = np.zeros((self.spec_capacity, self.win), dtype=np.float32)
+        self.spec_index = 0
+        self.formant_buf = np.full((3, self.spec_capacity), np.nan, dtype=np.float32)
+        self.formant_method = "burg"
+        self.formant_max_hz = 5500
+        self.lpc_order = 16
 
         self.stream = AudioStream(sr=self.sr, blocksize=self.blocksize)
         self.stream.start()
@@ -62,6 +73,33 @@ class MainWindow(QMainWindow):
         # F0推定（YIN）
         f0 = yin_f0(frame, self.sr, fmin=75, fmax=350)  # 後でUIから変更可
         self.pitch.update_pitch(f0)
+
+        # フォルマント推定
+        formants: tuple[float, float, float]
+        if self.formant_method == "burg":
+            formants = burg_formants_parselmouth(frame, self.sr, fmax=self.formant_max_hz)
+            if not any(formants):
+                formants = lpc_formants(
+                    frame, self.sr, order=self.lpc_order, fmax=self.formant_max_hz
+                )
+        else:
+            formants = lpc_formants(frame, self.sr, order=self.lpc_order, fmax=self.formant_max_hz)
+
+        idx = self.spec_index % self.spec_capacity
+        self.spec_frames[idx] = frame
+        self.formant_buf[:, idx] = np.asarray(formants, dtype=np.float32)
+        self.spec_index += 1
+
+        valid = min(self.spec_index, self.spec_capacity)
+        if valid:
+            indices = (np.arange(valid) + self.spec_index - valid) % self.spec_capacity
+            frames = self.spec_frames[indices]
+            history = self.formant_buf[:, indices]
+            spec_db, freq_axis, time_axis = stft_mag_db(
+                frames, self.sr, n_fft=self.n_fft, hop=self.blocksize
+            )
+            self.spectro.update_spectrogram(spec_db, freq_axis, time_axis)
+            self.spectro.update_formants(time_axis, history[0], history[1], history[2])
 
         # 簡易：直近0.5秒の±centゆらぎ
         cents_std = self._cents_std_recent()
