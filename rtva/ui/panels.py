@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt
@@ -57,13 +59,80 @@ class PitchPanel(QWidget):
 
 
 class SpectroPanel(QWidget):
-    """スペクトログラム/フォームント用プレースホルダ"""
+    """スペクトログラムとフォームントのオーバーレイ表示。"""
 
-    def __init__(self) -> None:
+    def __init__(self, fmax: int = 6000) -> None:
         super().__init__()
+        self.fmax = fmax
         layout = QVBoxLayout()
         self.setLayout(layout)
-        layout.addWidget(QLabel("Spectrogram (coming soon)"))
+
+        self.plot = pg.PlotWidget()
+        self.plot.setLabel("left", "Frequency (Hz)")
+        self.plot.setLabel("bottom", "Time (s)")
+        self.plot.showGrid(x=True, y=True, alpha=0.2)
+        self.plot.setMenuEnabled(False)
+        self.plot.hideButtons()
+        self.plot.setYRange(0, fmax)
+        self.plot.setLimits(yMin=0, yMax=fmax)
+
+        cmap = pg.colormap.get("magma")
+        self.image_item = pg.ImageItem()
+        self.image_item.setLookupTable(cmap.getLookupTable(alpha=False))
+        self.image_item.setLevels([-120.0, 0.0])
+        self.plot.addItem(self.image_item)
+
+        pens = [
+            pg.mkPen("#ff6f61", width=2),
+            pg.mkPen("#6abf69", width=2),
+            pg.mkPen("#5b8def", width=2),
+        ]
+        self.formant_curves = [self.plot.plot(pen=pen) for pen in pens]
+
+        layout.addWidget(self.plot)
+
+    def update(
+        self,
+        S_db: np.ndarray,
+        freqs: np.ndarray,
+        times: np.ndarray,
+        formants: list[np.ndarray] | None,
+    ) -> None:
+        if S_db.size == 0 or freqs.size == 0 or times.size == 0:
+            return
+
+        self.image_item.resetTransform()
+        self.image_item.setImage(S_db, autoLevels=False)
+
+        if times.size > 1:
+            dt = float(times[1] - times[0])
+        else:
+            dt = 1.0
+        if freqs.size > 1:
+            df = float(freqs[1] - freqs[0])
+        else:
+            df = float(freqs[-1]) if freqs.size else 1.0
+
+        self.image_item.scale(dt, -df)
+        self.image_item.setPos(float(times[0]), float(freqs[-1]))
+
+        self.plot.setXRange(float(times[0]), float(times[-1]), padding=0.0)
+        ymax = min(float(freqs[-1]), float(self.fmax))
+        self.plot.setYRange(0.0, ymax, padding=0.0)
+        self.plot.setLimits(xMin=float(times[0]), xMax=0.0, yMin=0.0, yMax=float(freqs[-1]))
+
+        if formants is None:
+            for curve in self.formant_curves:
+                curve.setData([], [])
+            return
+
+        for idx, curve in enumerate(self.formant_curves):
+            if idx < len(formants) and len(formants[idx]) == len(times):
+                values = np.asarray(formants[idx], dtype=float)
+                values = np.clip(values, 0.0, float(freqs[-1]))
+                curve.setData(times, values)
+            else:
+                curve.setData([], [])
 
 
 class HarmonicsPanel(QWidget):
