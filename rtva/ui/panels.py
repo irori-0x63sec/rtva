@@ -30,7 +30,9 @@ class PitchPanel(QWidget):
         self.curve = self.plot.plot(pen=pg.mkPen(width=2))
         layout.addWidget(self.plot)
 
-        self.capacity = int(timespan_sec * sr_hop)
+        self.timespan_sec = float(timespan_sec)
+        self.rate_hz = float(sr_hop)
+        self.capacity = max(1, int(self.timespan_sec * self.rate_hz))
         self.buf = np.full(self.capacity, np.nan, dtype=float)
         self.index = 0
 
@@ -40,7 +42,7 @@ class PitchPanel(QWidget):
 
         y = self.buf.take(np.arange(self.capacity), mode="wrap")
         if len(y) > 0:
-            x = np.linspace(-len(y) / 100.0, 0.0, len(y))  # 100Hz更新想定
+            x = np.linspace(-len(y) / max(self.rate_hz, 1.0), 0.0, len(y))
             self.curve.setData(x, y)
 
         self.value_label.setText(f"F0: {f0_hz:6.1f} Hz" if f0_hz > 0 else "F0: -- Hz")
@@ -50,6 +52,16 @@ class PitchPanel(QWidget):
             self.stability_label.setText("±cent: --")
         else:
             self.stability_label.setText(f"±cent: {cents_std:4.1f}")
+
+    def set_rate(self, rate_hz: float) -> None:
+        if rate_hz <= 0:
+            return
+        self.rate_hz = float(rate_hz)
+        capacity = max(1, int(self.timespan_sec * self.rate_hz))
+        if capacity != self.capacity:
+            self.capacity = capacity
+            self.buf = np.full(self.capacity, np.nan, dtype=float)
+            self.index = 0
 
 
 class SpectroPanel(QWidget):
@@ -171,16 +183,94 @@ class SpectroPanel(QWidget):
 
 
 class HarmonicsPanel(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, timespan_sec: float = 10.0, sr_hop: int = 50) -> None:
         super().__init__()
         layout = QVBoxLayout()
         self.setLayout(layout)
-        layout.addWidget(QLabel("H1–H2 (coming soon)"))
+
+        self.value_label = QLabel("H1–H2: -- dB")
+        layout.addWidget(self.value_label)
+
+        self.plot = pg.PlotWidget()
+        self.plot.setLabel("left", "H1–H2 (dB)")
+        self.plot.setLabel("bottom", "time (s)")
+        self.plot.setYRange(-40, 40)
+        self.curve = self.plot.plot(pen=pg.mkPen(width=2))
+        layout.addWidget(self.plot)
+
+        self.timespan_sec = float(timespan_sec)
+        self.rate_hz = float(sr_hop)
+        self.capacity = max(1, int(self.timespan_sec * self.rate_hz))
+        self.buf = np.full(self.capacity, np.nan, dtype=float)
+        self.index = 0
+
+    def update_value(self, value: float | None) -> None:
+        v = float(value) if value is not None and np.isfinite(value) else np.nan
+        self.buf[self.index % self.capacity] = v
+        self.index += 1
+
+        y = self.buf.take(np.arange(self.capacity), mode="wrap")
+        x = np.linspace(-len(y) / max(self.rate_hz, 1.0), 0.0, len(y))
+        self.curve.setData(x, y)
+
+        if np.isnan(v):
+            self.value_label.setText("H1–H2: -- dB")
+        else:
+            self.value_label.setText(f"H1–H2: {v:5.2f} dB")
+
+    def set_rate(self, rate_hz: float) -> None:
+        if rate_hz <= 0:
+            return
+        self.rate_hz = float(rate_hz)
+        capacity = max(1, int(self.timespan_sec * self.rate_hz))
+        if capacity != self.capacity:
+            self.capacity = capacity
+            self.buf = np.full(self.capacity, np.nan, dtype=float)
+            self.index = 0
 
 
 class CPPPanel(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, timespan_sec: float = 30.0, sr_hop: int = 10) -> None:
         super().__init__()
         layout = QVBoxLayout()
         self.setLayout(layout)
-        layout.addWidget(QLabel("CPP (coming soon)"))
+
+        self.value_label = QLabel("CPP: -- dB")
+        layout.addWidget(self.value_label)
+
+        self.plot = pg.PlotWidget()
+        self.plot.setLabel("left", "CPP (dB)")
+        self.plot.setLabel("bottom", "time (s)")
+        self.plot.setYRange(-10, 35)
+        self.curve = self.plot.plot(pen=pg.mkPen(width=2))
+        layout.addWidget(self.plot)
+
+        self.timespan_sec = float(timespan_sec)
+        self.rate_hz = float(sr_hop)
+        self.capacity = max(1, int(self.timespan_sec * self.rate_hz))
+        self.buf = np.full(self.capacity, np.nan, dtype=float)
+        self.index = 0
+
+    def update_value(self, value: float | None) -> None:
+        v = float(value) if value is not None and np.isfinite(value) else np.nan
+        self.buf[self.index % self.capacity] = v
+        self.index += 1
+
+        y = self.buf.take(np.arange(self.capacity), mode="wrap")
+        x = np.linspace(-len(y) / max(self.rate_hz, 1.0), 0.0, len(y))
+        self.curve.setData(x, y)
+
+        if np.isnan(v):
+            self.value_label.setText("CPP: -- dB")
+        else:
+            self.value_label.setText(f"CPP: {v:5.2f} dB")
+
+    def set_rate(self, rate_hz: float) -> None:
+        if rate_hz <= 0:
+            return
+        self.rate_hz = float(rate_hz)
+        capacity = max(1, int(self.timespan_sec * self.rate_hz))
+        if capacity != self.capacity:
+            self.capacity = capacity
+            self.buf = np.full(self.capacity, np.nan, dtype=float)
+            self.index = 0
