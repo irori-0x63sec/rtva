@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+dist/
+build/
+*.spec
+sessions/
+*.parquet
+*.csv
+*.png
+.vscode/
+.idea/
