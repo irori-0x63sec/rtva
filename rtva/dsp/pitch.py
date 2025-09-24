@@ -26,7 +26,9 @@ def _pitch_parselmouth(
     return float(np.median(vals))
 
 
-def _pitch_autocorr(frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float = 350.0) -> float:
+def _pitch_autocorr(
+    frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float = 350.0
+) -> float:
     """軽量なオートコリレーションによるF0推定（簡易版）。"""
     x = frame.astype(np.float64)
     x -= x.mean()
@@ -55,7 +57,9 @@ def _pitch_autocorr(frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float 
     return float(sr / lag)
 
 
-def yin_f0(frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float = 350.0) -> float:
+def yin_f0(
+    frame: np.ndarray, sr: int, fmin: float = 75.0, fmax: float = 350.0
+) -> float:
     """以前のAPI名(yin_f0)をそのままにして互換維持。"""
     if parselmouth is not None:
         try:

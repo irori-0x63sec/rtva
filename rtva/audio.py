@@ -21,11 +21,11 @@ class AudioStream:
 
     def _callback(self, indata, frames, time, status):
         if status:
-            # XRunsなどは一旦黙殺。必要ならログへ。
+            # XRunsなどのステータス。必要ならログへ。
             pass
         try:
             self.q.put_nowait(indata[:, 0].copy())
-        except:
+        except Exception:  # ★ bare except を明示的に
             # バックプレッシャ時は捨てる
             pass
 

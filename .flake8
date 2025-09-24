@@ -1,0 +1,17 @@
+# .flake8
+[flake8]
+# PEP8準拠だと79だけど、本リポは100に統一（Black設定と合わせる）
+max-line-length = 100
+# Blackと相性の悪いルールは無効（公式推奨）
+extend-ignore = E203, W503
+# 仮想環境やビルド・キャッシュ・site-packages を除外
+exclude = 
+    .git,
+    .venv,
+    venv,
+    build,
+    dist,
+    **/__pycache__/**,
+    .mypy_cache,
+    .pytest_cache,
+    **/site-packages/**
