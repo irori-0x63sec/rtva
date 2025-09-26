@@ -87,3 +87,36 @@ def h1_h2_db(frame: NDArray[np.floating], sr: int, f0: float) -> float:
         return float(np.nan)
 
     return 20.0 * np.log10((h1 + 1e-12) / (h2 + 1e-12))
+
+
+def hnr_db(frame: NDArray[np.floating], sr: int, f0: float) -> float:
+    """Estimate the harmonic-to-noise ratio in dB."""
+
+    if f0 <= 0 or not np.isfinite(f0):
+        return float(np.nan)
+
+    x = np.asarray(frame, dtype=np.float64)
+    if x.size == 0 or not np.any(np.isfinite(x)):
+        return float(np.nan)
+
+    x = x - np.mean(x)
+    if not np.any(np.abs(x) > 0):
+        return float(np.nan)
+
+    autocorr = np.correlate(x, x, mode="full")
+    autocorr = autocorr[x.size - 1 :]
+    if autocorr.size == 0 or autocorr[0] <= 0:
+        return float(np.nan)
+
+    lag = int(round(sr / float(f0)))
+    if lag <= 0 or lag >= autocorr.size:
+        return float(np.nan)
+
+    r0 = autocorr[0]
+    r_tau = autocorr[lag]
+    if r_tau <= 0:
+        return float(np.nan)
+
+    noise = max(r0 - r_tau, 1e-12)
+    ratio = r_tau / noise
+    return 10.0 * np.log10(max(ratio, 1e-12))
