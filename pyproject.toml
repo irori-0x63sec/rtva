@@ -13,6 +13,7 @@ dependencies = [
   "numpy",
   "scipy",
   "sounddevice",
+  "soundfile>=0.12",
   "pyqt6",
   "pyqtgraph",
   "librosa",
@@ -20,7 +21,8 @@ dependencies = [
   "pandas",
   "pyarrow",
   "pydantic",
-  "loguru"
+  "loguru",
+  "pydub"
 ]
 
 [project.optional-dependencies]
