@@ -8,7 +8,7 @@ from typing import Deque, Optional
 
 import numpy as np
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QMainWindow, QPushButton, QVBoxLayout, QWidget
 
 from rtva.audio import AudioStream, hann
 from rtva.config import AnalyzerConfig, save_preset
@@ -47,9 +47,21 @@ class MainWindow(QMainWindow):
         self._parselmouth_available = PARSELMOUTH_AVAILABLE
 
         central = QWidget(self)
-        root_layout = QHBoxLayout(central)
+        root_layout = QVBoxLayout(central)
+        self.setCentralWidget(central)
+
+        controls_bar = QHBoxLayout()
+        self.btn_start = QPushButton("Start")
+        self.btn_stop = QPushButton("Stop")
+        self.btn_stop.setEnabled(False)
+        controls_bar.addWidget(self.btn_start)
+        controls_bar.addWidget(self.btn_stop)
+        controls_bar.addStretch(1)
+        root_layout.addLayout(controls_bar)
+
+        main_layout = QHBoxLayout()
         self.controls = ControlsPanel(self.cfg, parselmouth_available=self._parselmouth_available)
-        root_layout.addWidget(self.controls, stretch=0)
+        main_layout.addWidget(self.controls, stretch=0)
 
         panels = QWidget(self)
         panels_layout = QVBoxLayout()
@@ -64,12 +76,13 @@ class MainWindow(QMainWindow):
         panels_layout.addWidget(self.spectro)
         panels_layout.addWidget(self.harm)
         panels_layout.addWidget(self.cpp)
-        root_layout.addWidget(panels, stretch=1)
-        self.setCentralWidget(central)
+        main_layout.addWidget(panels, stretch=1)
+        root_layout.addLayout(main_layout, stretch=1)
 
         self.controls.config_changed.connect(self._apply_config)
 
         self.stream: Optional[AudioStream] = None
+        self.running = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
 
@@ -81,6 +94,7 @@ class MainWindow(QMainWindow):
 
         self._audio_buffer = np.zeros(1, dtype=np.float32)
         self._analysis_window = np.ones(1, dtype=np.float32)
+        self._formant_history_len = 1
         self._formant_history: tuple[Deque[float], Deque[float], Deque[float]] = (
             deque(),
             deque(),
@@ -88,24 +102,66 @@ class MainWindow(QMainWindow):
         )
 
         self._apply_config(self.cfg)
-        self.timer.start(self.cfg.hop_ms)
         self._save_session_settings()
 
+        self.btn_start.clicked.connect(self.start_analysis)
+        self.btn_stop.clicked.connect(self.stop_analysis)
+
     def closeEvent(self, event):  # type: ignore[override]
-        if self.timer.isActive():
-            self.timer.stop()
+        self.stop_analysis()
+        self.recorder.stop()
+        return super().closeEvent(event)
+
+    def start_analysis(self) -> None:
+        if self.running:
+            return
+
+        hop_samples = max(1, int(round(self.cfg.sr * self.cfg.hop_ms / 1000)))
+        try:
+            stream = AudioStream(sr=self.cfg.sr, blocksize=hop_samples)
+            stream.start()
+        except Exception as exc:  # pragma: no cover - runtime device errors
+            if not hasattr(self, "_stream_err_once"):
+                print(f"[WARN] failed to start audio stream: {exc}")
+                self._stream_err_once = True
+            self.stream = None
+            return
+
+        self.stream = stream
+        self._reset_runtime_state()
+        self.running = True
+        self.btn_start.setEnabled(False)
+        self.btn_stop.setEnabled(True)
+        self.timer.start(self.cfg.hop_ms)
+
+    def stop_analysis(self) -> None:
+        if not self.running and self.stream is None:
+            return
+
+        try:
+            if self.timer.isActive():
+                self.timer.stop()
+        except Exception:
+            pass
+
         if self.stream is not None:
             try:
                 self.stream.stop()
             except Exception:
                 pass
-        self.recorder.stop()
-        return super().closeEvent(event)
+        self.stream = None
+        self.running = False
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
 
     def _apply_config(self, cfg: AnalyzerConfig) -> None:
         if cfg.formant_method == "burg" and not self._parselmouth_available:
             cfg = replace(cfg, formant_method="lpc")
             self.controls.set_config(cfg)
+
+        was_running = self.running
+        if was_running:
+            self.stop_analysis()
 
         self.cfg = cfg
         self._cpp_stride = max(1, int(round((1000.0 / cfg.hop_ms) / self._cpp_rate_hz)))
@@ -115,23 +171,12 @@ class MainWindow(QMainWindow):
         frame_samples = max(hop_samples, int(round(cfg.sr * cfg.frame_ms / 1000)))
         self._n_fft = max(2048, 1 << int(np.ceil(np.log2(frame_samples))))
 
-        if self.stream is not None:
-            try:
-                self.stream.stop()
-            except Exception:
-                pass
-        self.stream = AudioStream(sr=cfg.sr, blocksize=hop_samples)
-        self.stream.start()
-
         buffer_frames = max(1, int(self._spectrogram_window_sec * 1000 / cfg.hop_ms))
         buffer_len = frame_samples + max(0, buffer_frames - 1) * hop_samples
         self._audio_buffer = np.zeros(buffer_len, dtype=np.float32)
         self._analysis_window = hann(frame_samples).astype(np.float32)
-        self._formant_history = (
-            deque([np.nan] * buffer_frames, maxlen=buffer_frames),
-            deque([np.nan] * buffer_frames, maxlen=buffer_frames),
-            deque([np.nan] * buffer_frames, maxlen=buffer_frames),
-        )
+        self._formant_history_len = buffer_frames
+        self._formant_history = self._init_formant_history(buffer_frames)
 
         rate_hz = 1000.0 / cfg.hop_ms
         self.pitch.set_rate(rate_hz)
@@ -141,6 +186,24 @@ class MainWindow(QMainWindow):
         self.timer.setInterval(cfg.hop_ms)
         self.recorder.rate_hz = cfg.log_rate_hz
         self._save_session_settings()
+
+        if was_running:
+            self.start_analysis()
+
+    def _init_formant_history(self, length: int) -> tuple[Deque[float], Deque[float], Deque[float]]:
+        length = max(1, int(length))
+        return (
+            deque([np.nan] * length, maxlen=length),
+            deque([np.nan] * length, maxlen=length),
+            deque([np.nan] * length, maxlen=length),
+        )
+
+    def _reset_runtime_state(self) -> None:
+        if self._audio_buffer.size:
+            self._audio_buffer = np.zeros_like(self._audio_buffer)
+        self._formant_history = self._init_formant_history(self._formant_history_len)
+        self._cpp_counter = 0
+        self._last_cpp = float("nan")
 
     def _append_audio(self, hop: np.ndarray) -> None:
         hop = hop.astype(np.float32, copy=False)
@@ -156,7 +219,7 @@ class MainWindow(QMainWindow):
         return self._audio_buffer[-frame_len:]
 
     def _tick(self) -> None:
-        if self.stream is None:
+        if not self.running or self.stream is None:
             return
 
         try:
