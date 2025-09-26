@@ -39,11 +39,11 @@ def test_formant_estimators_reasonable(method: str) -> None:
     if method == "burg":
         if not PARSELMOUTH_AVAILABLE:
             pytest.xfail("parselmouth not available")
-        f1, f2, f3 = burg_formants_parselmouth(frame, sr, fmax=4000)
+        f1, f2, f3 = burg_formants_parselmouth(frame, sr, fmax=4000)[:3]
         if (f1, f2, f3) == (0.0, 0.0, 0.0):
             pytest.xfail("parselmouth backend unavailable")
     else:
-        f1, f2, f3 = lpc_formants(frame, sr, order=16, fmax=4000)
+        f1, f2, f3 = lpc_formants(frame, sr, order=16, fmax=4000)[:3]
 
     estimates = (f1, f2, f3)
     for est, target in zip(estimates[:2], targets[:2]):
@@ -53,5 +53,5 @@ def test_formant_estimators_reasonable(method: str) -> None:
 def test_lpc_returns_zero_for_silence() -> None:
     sr = 16000
     silence = np.zeros(int(0.04 * sr), dtype=np.float32)
-    f1, f2, f3 = lpc_formants(silence, sr)
+    f1, f2, f3 = lpc_formants(silence, sr)[:3]
     assert (f1, f2, f3) == (0.0, 0.0, 0.0)
