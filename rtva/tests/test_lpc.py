@@ -28,9 +28,7 @@ def test_lpc_formants_tracks_targets():
     tone = _synth_vowel(target_formants, bandwidths, sr=sr, duration=0.2)
     start = int(0.05 * sr)
     frame = tone[start : start + int(0.04 * sr)]
-    f1, f2, f3 = lpc_formants(frame, sr, order=14, fmax=4000)
-
-    results = [f1, f2, f3]
+    results = list(lpc_formants(frame, sr, order=14, fmax=4000)[:3])
     for est, target in zip(results, target_formants):
         assert target * 0.85 < est < target * 1.15
 
@@ -38,5 +36,5 @@ def test_lpc_formants_tracks_targets():
 def test_lpc_formants_silence_returns_zero():
     sr = 16000
     silence = np.zeros(int(0.04 * sr), dtype=np.float32)
-    f1, f2, f3 = lpc_formants(silence, sr, order=12)
+    f1, f2, f3 = lpc_formants(silence, sr, order=12)[:3]
     assert f1 == 0.0 and f2 == 0.0 and f3 == 0.0

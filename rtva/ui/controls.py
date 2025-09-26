@@ -4,6 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -62,11 +63,10 @@ class ControlsPanel(QWidget):
         form_layout.addRow("Pitch max", self.pitch_max_spin)
 
         self.formant_combo = QComboBox()
-        self.formant_combo.addItems(["burg", "lpc"])
-        if not parselmouth_available:
-            index = self.formant_combo.findText("burg")
-            if index >= 0:
-                self.formant_combo.removeItem(index)
+        methods = ["auto", "burg", "lpc"]
+        if not parselmouth_available and "burg" in methods:
+            methods.remove("burg")
+        self.formant_combo.addItems(methods)
         form_layout.addRow("Formant method", self.formant_combo)
 
         self.formant_max_spin = QSpinBox()
@@ -78,11 +78,50 @@ class ControlsPanel(QWidget):
         self.lpc_order_spin.setRange(8, 32)
         form_layout.addRow("LPC order", self.lpc_order_spin)
 
+        self.formant_count_spin = QSpinBox()
+        self.formant_count_spin.setRange(1, 5)
+        self.formant_count_spin.setValue(5)
+        form_layout.addRow("Formant count", self.formant_count_spin)
+
         self.log_rate_spin = QSpinBox()
         self.log_rate_spin.setRange(1, 60)
         form_layout.addRow("Log rate (Hz)", self.log_rate_spin)
 
         layout.addWidget(form_box)
+
+        display_box = QGroupBox("Display")
+        display_layout = QFormLayout()
+        display_box.setLayout(display_layout)
+
+        self.colormap_combo = QComboBox()
+        self.colormap_combo.addItems(["magma", "inferno", "viridis", "plasma", "cividis", "gray"])
+        display_layout.addRow("Colormap", self.colormap_combo)
+
+        self.db_auto_check = QCheckBox("Auto dB range")
+        display_layout.addRow(self.db_auto_check)
+
+        self.db_min_spin = QDoubleSpinBox()
+        self.db_min_spin.setRange(-160.0, 20.0)
+        self.db_min_spin.setSingleStep(1.0)
+        display_layout.addRow("dB min", self.db_min_spin)
+
+        self.db_max_spin = QDoubleSpinBox()
+        self.db_max_spin.setRange(-80.0, 60.0)
+        self.db_max_spin.setSingleStep(1.0)
+        display_layout.addRow("dB max", self.db_max_spin)
+
+        formant_box = QGroupBox("Formant overlay")
+        formant_layout = QHBoxLayout()
+        formant_box.setLayout(formant_layout)
+        self.formant_checks: list[QCheckBox] = []
+        for idx in range(5):
+            cb = QCheckBox(f"F{idx + 1}")
+            cb.setChecked(True)
+            self.formant_checks.append(cb)
+            formant_layout.addWidget(cb)
+        display_layout.addRow(formant_box)
+
+        layout.addWidget(display_box)
 
         buttons_layout = QHBoxLayout()
         self.save_btn = QPushButton("Save preset")
@@ -109,7 +148,9 @@ class ControlsPanel(QWidget):
             self.formant_combo,
             self.formant_max_spin,
             self.lpc_order_spin,
+            self.formant_count_spin,
             self.log_rate_spin,
+            self.colormap_combo,
         ]
         for widget in widgets:
             if isinstance(widget, QComboBox):
@@ -118,6 +159,10 @@ class ControlsPanel(QWidget):
                 widget.valueChanged.connect(self._emit_config)
             else:
                 widget.valueChanged.connect(self._emit_config)
+
+        self.db_auto_check.toggled.connect(self._emit_config)
+        for cb in self.formant_checks:
+            cb.toggled.connect(self._emit_config)
 
     def set_config(self, cfg: AnalyzerConfig) -> None:
         self._updating = True
@@ -135,13 +180,42 @@ class ControlsPanel(QWidget):
                 self.formant_combo.setCurrentIndex(0)
             self.formant_max_spin.setValue(cfg.formant_max_hz)
             self.lpc_order_spin.setValue(cfg.lpc_order)
+            self.formant_count_spin.setValue(cfg.formant_count)
             self.log_rate_spin.setValue(cfg.log_rate_hz)
+            cmap_idx = self.colormap_combo.findText(cfg.colormap)
+            if cmap_idx >= 0:
+                self.colormap_combo.setCurrentIndex(cmap_idx)
+            else:
+                self.colormap_combo.setCurrentIndex(0)
+            auto = cfg.db_min is None or cfg.db_max is None
+            self.db_auto_check.setChecked(auto)
+            self.db_min_spin.setEnabled(not auto)
+            self.db_max_spin.setEnabled(not auto)
+            if cfg.db_min is not None:
+                self.db_min_spin.setValue(cfg.db_min)
+            if cfg.db_max is not None:
+                self.db_max_spin.setValue(cfg.db_max)
+            for idx, cb in enumerate(self.formant_checks):
+                if idx < len(cfg.show_formants):
+                    cb.setChecked(bool(cfg.show_formants[idx]))
+                else:
+                    cb.setChecked(True)
         finally:
             self._updating = False
 
     def _emit_config(self) -> None:
         if self._updating:
             return
+        auto_db = self.db_auto_check.isChecked()
+        db_min = float(self.db_min_spin.value()) if not auto_db else None
+        db_max = float(self.db_max_spin.value()) if not auto_db else None
+        if db_min is not None and db_max is not None and db_min >= db_max:
+            db_max = db_min + 1.0
+            self._updating = True
+            try:
+                self.db_max_spin.setValue(db_max)
+            finally:
+                self._updating = False
         cfg = AnalyzerConfig(
             sr=int(self.sr_spin.value()),
             frame_ms=int(self.frame_spin.value()),
@@ -152,6 +226,11 @@ class ControlsPanel(QWidget):
             formant_max_hz=int(self.formant_max_spin.value()),
             lpc_order=int(self.lpc_order_spin.value()),
             log_rate_hz=int(self.log_rate_spin.value()),
+            formant_count=int(self.formant_count_spin.value()),
+            colormap=self.colormap_combo.currentText(),
+            db_min=db_min,
+            db_max=db_max,
+            show_formants=tuple(cb.isChecked() for cb in self.formant_checks),
         )
         if not self._parselmouth_available and cfg.formant_method == "burg":
             cfg.formant_method = "lpc"
@@ -159,6 +238,8 @@ class ControlsPanel(QWidget):
             if idx >= 0:
                 self.formant_combo.setCurrentIndex(idx)
         self._cfg = cfg
+        self.db_min_spin.setEnabled(not auto_db)
+        self.db_max_spin.setEnabled(not auto_db)
         self.config_changed.emit(cfg)
 
     def _save_preset(self) -> None:

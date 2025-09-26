@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Iterable
+
+try:
+    from typing import get_args, get_origin
+except ImportError:  # pragma: no cover - Python <3.8 fallback
+
+    def get_origin(tp):  # type: ignore
+        return getattr(tp, "__origin__", None)
+
+    def get_args(tp):  # type: ignore
+        return getattr(tp, "__args__", ())
+
 
 try:  # Prefer PyYAML if available
     import yaml
@@ -17,10 +28,21 @@ class AnalyzerConfig:
     hop_ms: int = 10
     pitch_min: float = 120.0
     pitch_max: float = 400.0
-    formant_method: str = "burg"
+    formant_method: str = "auto"
     formant_max_hz: int = 5500
     lpc_order: int = 16
     log_rate_hz: int = 10
+    formant_count: int = 5
+    colormap: str = "magma"
+    db_min: float | None = None
+    db_max: float | None = None
+    show_formants: tuple[bool, bool, bool, bool, bool] = (
+        True,
+        True,
+        True,
+        True,
+        True,
+    )
 
 
 def _coerce(field_name: str, value: Any) -> Any:
@@ -33,6 +55,31 @@ def _coerce(field_name: str, value: Any) -> Any:
                 return float(value)
             if typ is str:
                 return str(value)
+            if typ is bool:
+                if isinstance(value, str):
+                    return value.strip().lower() in {"1", "true", "yes", "on"}
+                return bool(value)
+            origin = get_origin(typ)
+            if origin in (tuple, list):
+                args: Iterable[Any] = get_args(typ)
+                if isinstance(value, (list, tuple)):
+                    if all(arg is bool for arg in args):
+                        seq = [bool(v) for v in value]
+                        if origin is tuple:
+                            length = len(tuple(args)) or len(seq)
+                            return tuple(seq[:length])
+                        return seq
+                return value
+            if origin is not None and any(arg is type(None) for arg in get_args(typ)):
+                for arg in get_args(typ):
+                    if arg is type(None) and (value in (None, "null", "None")):
+                        return None
+                    if arg is float:
+                        return float(value) if value is not None else None
+                    if arg is int:
+                        return int(value) if value is not None else None
+                    if arg is str:
+                        return str(value) if value is not None else None
             return value
     return value
 
